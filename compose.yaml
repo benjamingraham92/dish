@@ -1,0 +1,21 @@
+services:
+  recipes-db:
+    build: ./postgres
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    container_name: recipes-db
+  recipes-scraper:
+    build: .
+    ports:
+      - 8000:8000
+    volumes:
+      - ./postgres/data:/var/lib/postgresql
+    container_name: recipes-scraper
+
+networks:
+  dish:
+    name: dish
+    driver: bridge
