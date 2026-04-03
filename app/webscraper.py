@@ -1,3 +1,5 @@
+from collections import deque
+
 import logging
 import sys
 import requests
@@ -48,7 +50,7 @@ def load_more_recipes(page_num: int) -> BeautifulSoup:
     return make_soup(response)
 
 def get_recipes(links: list[str]) -> list[dict]:
-    recipes = []
+    recipes = deque()
     for link in links:
         recipe = {}
         response = requests.get(f'{HOST}{link}')
@@ -57,7 +59,7 @@ def get_recipes(links: list[str]) -> list[dict]:
         recipe['ingredients'] = add_recipe_ingredients(soup)
         recipe['method'] = add_recipe_method(soup)
         if recipe['method'] != '[]':
-            recipes.append(recipe)
+            recipes.appendleft(recipe)
             logger.info(f'Added {len(recipes)} recipe{'s' if len(recipes) != 1 else ''}')
         else:
             logger.warning(f'Recipe for {recipe['title']} unavailable. Skipping...')
