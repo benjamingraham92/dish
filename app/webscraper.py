@@ -64,7 +64,7 @@ def get_recipes(links: list[str]) -> list[dict]:
     return recipes
 
 def add_recipe_title(soup: BeautifulSoup) -> str:
-    title = soup.find('h1', class_='detail-panel__page-title type-h2 pt-24 sm:pt-32 astro-edmpjb4m')
+    title = soup.find('h1', class_='detail-panel__page-title type-h2 sm:pt-32 astro-edmpjb4m')
     return title.string
 
 def add_recipe_ingredients(soup: BeautifulSoup) -> str:
