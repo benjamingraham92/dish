@@ -1,8 +1,10 @@
 from collections import deque
-
 import logging
 import sys
-import requests
+import asyncio
+import types
+
+import aiohttp
 from bs4 import BeautifulSoup
 
 import db
@@ -15,55 +17,66 @@ handler = logging.StreamHandler(sys.stdout)
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
-def main():
-    response = requests.get(f'{HOST}{PATH}')
+async def main():
+    async with aiohttp.ClientSession() as session:
+        num_of_pages = await get_number_of_pages(session)
+        logger.info('Number of pages: %d', num_of_pages)
+        urls = get_links_for_recipe_pages(session, num_of_pages)
+        links = await asyncio.gather(*(get_recipe_links(session, url) for url in urls))
+        links = [link for list_of_links in links for link in list_of_links]
+        logger.info('Got recipe links')
+        recipes = deque()
+        await asyncio.gather(*(get_recipes(session, link, recipes) for link in links))
+        logger.info('Got recipes')
+        logger.info(f'{len(recipes)} recipes shown')
+        show_recipes(recipes)
+        conn = db.connect_db()
+        db.insert_recipes(conn, recipes)
+        db.query_results(conn)
+
+async def get_number_of_pages(session: aiohttp.ClientSession) -> int:
+    response = await fetch(f'{HOST}{PATH}', session)
     soup = make_soup(response)
-    logger.info('Soup made')
-    links = get_recipe_links(soup)
-    logger.info('Got recipe links')
-    recipes = get_recipes(links)
-    logger.info('Got recipes')
-    show_recipes(recipes)
-    logger.info(f'{len(recipes)} recipes shown')
-    conn = db.connect_db()
-    db.insert_recipes(conn, recipes)
-    db.query_results(conn)
+    pagination_div = soup.find('div', class_='pagination-grid__progress astro-b4fc5k6u')
+    p_tag = pagination_div.find('p')
+    strong_tags = p_tag.find_all('strong')
+    return -(int(strong_tags[1].string) // -(int(strong_tags[0].string)))
 
-def make_soup(response: requests.Response) -> BeautifulSoup:
-    return BeautifulSoup(response.content, 'html.parser')
+async def fetch(url: str, session: aiohttp.ClientSession) -> types.CoroutineType:
+    async with session.get(url) as response:
+        return await response.text()
+    
+def make_soup(response: aiohttp.ClientResponse) -> BeautifulSoup:
+    return BeautifulSoup(response, 'html.parser')
 
-def get_recipe_links(soup: BeautifulSoup) -> list[str]:
-    page_num = 1
+def get_links_for_recipe_pages(session: aiohttp.ClientSession, num_of_pages: int):
+    urls = []
+    for page_num in range(num_of_pages):
+        query = f'page={page_num}'
+        url = f'{HOST}{PATH}?{query}'
+        urls.append(url)
+    return urls
+
+async def get_recipe_links(session: aiohttp.ClientSession, url: str) -> list[str]:
     links = []
-    while True:
-        content_div = soup.find_all('div', class_='content-grid-item--4-col')
-        if not content_div:
-            break
-        [links.append(content.find('a').get('href')) for content in content_div if content_div]
-        soup = load_more_recipes(page_num)
-        page_num += 1
+    response = await fetch(url, session)
+    soup = make_soup(response)
+    content_div = soup.find_all('div', class_='content-grid-item--4-col')
+    [links.append(content.find('a').get('href')) for content in content_div if content_div]
     return links
 
-def load_more_recipes(page_num: int) -> BeautifulSoup:
-    query = f'?page={page_num}'
-    response = requests.get(f'{HOST}{PATH}{query}')
-    return make_soup(response)
-
-def get_recipes(links: list[str]) -> list[dict]:
-    recipes = deque()
-    for link in links:
-        recipe = {}
-        response = requests.get(f'{HOST}{link}')
-        soup = make_soup(response)
-        recipe['title'] = add_recipe_title(soup)
-        recipe['ingredients'] = add_recipe_ingredients(soup)
-        recipe['method'] = add_recipe_method(soup)
-        if recipe['method'] != '[]':
-            recipes.appendleft(recipe)
-            logger.info(f'Added {len(recipes)} recipe{'s' if len(recipes) != 1 else ''}')
-        else:
-            logger.warning(f'Recipe for {recipe['title']} unavailable. Skipping...')
-    return recipes
+async def get_recipes(session: aiohttp.ClientSession, link: str, recipes: deque) -> None:
+    recipe = {}
+    response = await fetch(f'{HOST}{link}', session)
+    soup = make_soup(response)
+    recipe['title'] = add_recipe_title(soup)
+    recipe['ingredients'] = add_recipe_ingredients(soup)
+    recipe['method'] = add_recipe_method(soup)
+    if recipe['method'] != '[]':
+        recipes.appendleft(recipe)
+        logger.info(f'Added {len(recipes)} recipe{'s' if len(recipes) != 1 else ''}')
+    else:
+        logger.warning(f'Recipe for {recipe['title']} unavailable. Skipping...')
 
 def add_recipe_title(soup: BeautifulSoup) -> str:
     title = soup.find('h1', class_='detail-panel__page-title type-h2 sm:pt-32 astro-edmpjb4m')
@@ -102,4 +115,4 @@ def show_recipes(recipes: list[dict]):
         logger.info(recipe['method'])
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
