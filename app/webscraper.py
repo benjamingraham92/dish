@@ -43,8 +43,18 @@ async def get_number_of_pages(session: aiohttp.ClientSession) -> int:
     return -(int(strong_tags[1].string) // -(int(strong_tags[0].string)))
 
 async def fetch(url: str, session: aiohttp.ClientSession) -> types.CoroutineType:
-    async with session.get(url) as response:
-        return await response.text()
+    try:
+        async with session.get(url) as response:
+            response.raise_for_status()
+            return await response.text()
+    except aiohttp.ClientResponseError as error:
+        logger.exception(f'HTTP Error {error.status} for {url}: {error.message}')
+    except aiohttp.ClientConnectionError as error:
+        logger.exception(f'Connection failed for {url}: {error}')
+    except asyncio.TimeoutError as error:
+        logger.exception(f'Request timed out for {url}: {error}')
+    except Exception as error:
+        logger.exception(f'Exception occurred: {error}')
     
 def make_soup(response: aiohttp.ClientResponse) -> BeautifulSoup:
     return BeautifulSoup(response, 'html.parser')
@@ -80,7 +90,11 @@ async def get_recipes(session: aiohttp.ClientSession, link: str, recipes: deque)
 
 def add_recipe_title(soup: BeautifulSoup) -> str:
     title = soup.find('h1', class_='detail-panel__page-title type-h2 sm:pt-32 astro-edmpjb4m')
-    return title.string
+    if title:
+        return title.string
+    else:
+        logger.error('No title for recipe found.')
+        raise AttributeError
 
 def add_recipe_ingredients(soup: BeautifulSoup) -> str:
     ingredients = []
